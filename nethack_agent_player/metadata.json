@@ -1,7 +1,7 @@
 {
   "name": "nethack_agent_player",
-  "version": "3.0.0",
-  "description": "让 Agent 通过 NLE 接口玩 NetHack，直接渲染 TTY 画面供 LLM 决策",
+  "version": "5.4.0",
+  "description": "让 Agent 通过 NLE 接口玩 NetHack，把游戏状态解析为结构化特征摘要供 LLM 逐回合决策",
   "author": "tzwkb",
   "triggers": ["nethack", "NetHack", "NLE", "玩nethack", "AI玩NetHack"],
   "tools": ["exec"],

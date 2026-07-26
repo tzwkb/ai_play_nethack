@@ -40,6 +40,18 @@
         "Identified at death: ring of sustain ability, scroll of identify (tiger-eye-ring / KERNOD-WEL appearances this game)."
       ],
       "date": "2026-06-04"
+    },
+    {
+      "turns": 1995,
+      "depth": 5,
+      "cause": "Killed by a gnome mummy in the Gnomish Mines (Dlvl 5) at XP level 6. A rolling-boulder trap cut HP from 31 to 14; resting in an exposed cavern allowed enemies to close, and the mummy dealt the final blow at 1 HP.",
+      "lessons": [
+        "Never rest while a hostile is visible or in an open Mines cavern after taking trap damage. Break line of sight and create several tiles of separation first; wait:N can let a full-speed enemy close and attack.",
+        "After a major trap hit leaves HP below 25%, stop exploring unknown tiles and prioritize the known upstairs or a defensible retreat. The second rolling-boulder trigger happened while moving onto the same trapped square at 3 HP.",
+        "Read safe unidentified scrolls before a crisis when identification can reveal healing or escape resources. An uncursed scroll of identify was still unread at death.",
+        "An unidentified consumable is not a reliable one-turn escape at 1 HP with an adjacent pursuer; using it spends the turn and still permits the monster's attack."
+      ],
+      "date": "2026-07-26"
     }
   ]
 }

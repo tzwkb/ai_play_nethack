@@ -9,7 +9,7 @@ from scripts import create_env
 from scripts.memory import Memory
 from scripts import state_parser
 from scripts import item_db
-from scripts import monster_db
+from scripts.postgame import extract_depth_and_cause
 
 CHAR_OPTIONS = {
     "roles": {
@@ -45,7 +45,7 @@ CHAR_OPTIONS = {
     },
     "format": "<role>-<race>-<gender>-<alignment>",
     "examples": ["wiz-hum-mal-neu", "val-hum-fem-neu", "bar-orc-mal-cha", "hea-gno-fem-neu"],
-    "note": "Invalid combos (e.g. val-hum-mal) are auto-corrected by NetHack. When unsure, pick wiz-hum-mal-neu or val-hum-fem-neu.",
+    "note": "Invalid combos (e.g. val-hum-mal) are auto-corrected by NetHack. Choose freely for the current run; no role is the default.",
 }
 
 def _select_character():
@@ -83,6 +83,7 @@ env._obs = obs
 env.turn = 0
 env.history = []
 state = env.render(obs)
+last_live_state = state
 
 # Generate session ID for per-game log files
 session_id = time.strftime('%Y%m%d_%H%M%S')
@@ -118,20 +119,10 @@ def _write_state(state):
     os.replace(tmp, "/tmp/nethack_state")
     open("/tmp/nethack_ready", "w").close()
 
-def _extract_death_info(state_text):
+def _extract_death_info(state_text, last_live_state=""):
     """Parse gameover state to extract identified items, depth, cause."""
     parsed = state_parser.parse_state(state_text)
-    depth = parsed.dlvl if parsed.dlvl > 0 else 1
-
-    # Extract cause from state text (e.g. "Killed by a dwarf.")
-    cause = "unknown"
-    for line in state_text.splitlines():
-        if "killed by" in line.lower() or "died" in line.lower() or "slain by" in line.lower():
-            cause = line.strip()
-            break
-        if "starved" in line.lower() or "poisoned" in line.lower():
-            cause = line.strip()
-            break
+    depth, cause = extract_depth_and_cause(state_text, last_live_state)
 
     # Extract identified items from inventory
     identified = []
@@ -173,12 +164,13 @@ def _extract_death_info(state_text):
     return depth, cause, identified
 
 
-def _signal_gameover(state):
-    depth, cause, identified = _extract_death_info(state)
+def _signal_gameover(state, last_live_state=""):
+    depth, cause, identified = _extract_death_info(state, last_live_state)
     lessons = []
     if identified:
         lessons.append("Identified items at death: " + ", ".join(identified[:5]))
     memory.save({
+        "game_id": session_id,
         "turns": env.turn,
         "depth": depth,
         "cause": cause,
@@ -204,6 +196,28 @@ try:
             os.remove(tmp_action)
 
             try:
+                item_use = None
+                forced = action.startswith("force:")
+                if forced:
+                    action = action[len("force:"):].strip()
+                safety_reason = env.check_action_safety(action)
+                if safety_reason and not forced:
+                    state = "[SAFETY BLOCK] {}\nUse force:<action> only after explicit risk review.\n{}".format(
+                        safety_reason, env.render())
+                    _write_state(state)
+                    if display_mode:
+                        _display_live(action)
+                    continue
+                for item_action in ("drink", "read", "zap"):
+                    prefix = item_action + ":"
+                    if action.startswith(prefix):
+                        slot = action[len(prefix):].split(":", 1)[0].strip()
+                        item_use = (
+                            item_action,
+                            env._inventory().get(slot, ""),
+                            int(env._obs['blstats'][10]),
+                        )
+                        break
                 if action.startswith("keys:"):
                     raw = action[len("keys:"):]
                     keys = []
@@ -221,9 +235,12 @@ try:
                         continue
                     state, reason = env.navigate_to(tx, ty)
                     state = "[GOTO] stopped: {} at ({},{})\n".format(reason, tx, ty) + state
-                elif action.startswith("search:") or action.startswith("wait:"):
+                elif (action.startswith("search:") or action.startswith("wait:")
+                      or action.startswith("safe_wait:")):
                     try:
                         act_name, n_str = action.split(":", 1)
+                        if act_name == "safe_wait":
+                            act_name = "wait"
                         n = max(1, int(n_str.strip()))
                     except (ValueError, IndexError):
                         state = "[ERROR] format: search:N or wait:N"
@@ -315,11 +332,17 @@ try:
                 except Exception:
                     pass
 
+            if item_use and "[CRASH]" not in state:
+                observation = env.record_item_use(*item_use)
+                if observation:
+                    state = "[ITEM OBSERVATION] {}\n{}".format(observation, state)
             _write_state(state)
+            if "[GAME OVER]" not in state:
+                last_live_state = state
             if display_mode:
                 _display_live(action)
             if "[GAME OVER]" in state:
-                _signal_gameover(state)
+                _signal_gameover(state, last_live_state)
                 break
         time.sleep(0.05)
 finally:

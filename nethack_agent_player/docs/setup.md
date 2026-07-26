@@ -44,7 +44,15 @@ export CFLAGS="-Wno-implicit-function-declaration -Wno-implicit-int -Wno-int-con
 .venv/bin/python -c "import nle, gymnasium; print('ok', nle.__version__)"
 ```
 
-Run with `./start_game_mac.sh` (or `.venv/bin/python play.py val-hum-fem-neu`).
+Run with `./start_game_mac.sh` and choose through the IPC prompt, or pass any valid
+character explicitly, such as `.venv/bin/python play.py bar-hum-mal-neu`.
 `play.py` needs the venv (nle); `agent_helper.py` is pure /tmp-file IPC and runs
 under any python3. play.py talks only via `/tmp` files, so no tmux is required —
 launch it in the background directly.
+
+**macOS env check (run before every session):** `.venv/bin/python -c "import nle"`.
+The `.venv` is git-ignored and **can go missing** (disk cleanup) — if it's absent or
+the import fails, re-run the one-time build above (recompiles NetHack from source,
+~3–5 min) **in the background**, then `rm -f /tmp/nethack_*` to clear stale IPC and
+launch. Build needs `export PATH=".../bison/bin:.../flex/bin:$PATH"` and the
+`CFLAGS` line, or the NetHack C build fails.

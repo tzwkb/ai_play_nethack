@@ -9,7 +9,7 @@ ACTION_MAP = {
     'ne': 4, 'se': 5, 'sw': 6, 'nw': 7,
     'n': 0, 'e': 1, 's': 2, 'w': 3,
     'wait': 18, 'search': 61, 'descend': 17, 'ascend': 16,
-    'pickup': 50, 'eat': 30, 'drink': 53, 'open': 48,
+    'pickup': 50, 'eat': 30, 'drink': 53, 'open': 48, 'pray': 51,
 }
 
 _TILE_LABEL = {
@@ -72,24 +72,14 @@ class NLEEnv:
         self.verbose = False
         self._map_cache = [[' '] * MAP_COLS for _ in range(MAP_ROWS)]
         self._prev_hp = None
+        self._last_damage = 0
+        self._major_hit_until = -1
         self._current_depth = None
+        self._known_hazards = {}
+        self._item_knowledge = {}
 
     def set_verbose(self, value):
         self.verbose = value
-
-    def reset(self):
-        ans = input('Print game state each turn? (y/n): ').strip().lower()
-        self.verbose = ans == 'y'
-        obs, _ = self.env.reset()
-        self._obs = obs
-        self.turn = 0
-        self.history = []
-        self._map_cache = [[' '] * MAP_COLS for _ in range(MAP_ROWS)]
-        self._prev_hp = None
-        self._current_depth = None
-        if self.verbose:
-            print(state)
-        return state
 
     def _flush_pending(self, max_presses=20):
         """Press space until no pagination prompt remains (--More--, -more-, etc.)."""
@@ -112,34 +102,6 @@ class NLEEnv:
             if done or truncated:
                 break
 
-    def detect_mode(self):
-        """Detect current game interaction mode from tty state."""
-        if self._obs is None:
-            return 'unknown'
-        tty = self._obs['tty_chars']
-        msg = bytes(self._obs['message']).decode('utf-8', errors='ignore').strip('\x00').strip()
-
-        # Check for pagination on screen
-        for row in range(24):
-            line = ''.join(chr(c) for c in tty[row]).rstrip()
-            if '--More--' in line or '-more-' in line or 'Hit space to continue:' in line:
-                return 'more_prompt'
-
-        # Check message for selection prompts
-        lowered = msg.lower()
-        if 'what do you want to' in lowered:
-            return 'item_select'
-        if 'in what direction' in lowered or 'direction?' in lowered:
-            return 'direction_select'
-        if 'really' in lowered and ('[yn' in lowered or '(n)' in lowered or '(y)' in lowered):
-            return 'yes_no'
-        if 'pick it up?' in lowered or '[ynq]' in lowered:
-            return 'yes_no'
-        if '[(end)]' in line or 'page' in lowered:
-            return 'menu'
-
-        return 'normal'
-
     def step(self, action_name):
         self._flush_pending()
         action_int = ACTION_MAP.get(action_name.lower())
@@ -159,15 +121,20 @@ class NLEEnv:
         return state
 
     def repeat_action(self, action_name, n):
-        """Execute action_name up to n times. Stops early if any message appears or game over.
+        """Execute action_name up to n times with a per-turn safety check.
         Returns (final_state, turns_executed, stopped_reason).
-        stopped_reason: 'done', 'interrupted', 'game_over', 'unknown_action'
+        stopped_reason: 'done', 'interrupted', 'unsafe', 'game_over', 'unknown_action'
         """
         if ACTION_MAP.get(action_name.lower()) is None:
             return 'Unknown action: {}'.format(action_name), 0, 'unknown_action'
         executed = 0
         state = self.render()
         for _ in range(n):
+            blocked = self.check_action_safety(action_name)
+            if blocked:
+                return state, executed, 'unsafe: {}'.format(blocked)
+            before_hostiles = self._visible_hostiles(self._obs)
+            before_hp = int(self._obs['blstats'][10])
             state = self.step(action_name)
             executed += 1
             if '[GAME OVER]' in state:
@@ -175,7 +142,179 @@ class NLEEnv:
             msg = bytes(self._obs['message']).decode('utf-8', errors='ignore').strip('\x00').strip()
             if msg:
                 return state, executed, 'interrupted'
+            after_hostiles = self._visible_hostiles(self._obs)
+            after_hp = int(self._obs['blstats'][10])
+            if after_hp < before_hp:
+                return state, executed, 'unsafe: HP decreased'
+            if after_hostiles and (
+                not before_hostiles
+                or min(h['distance'] for h in after_hostiles)
+                < min(h['distance'] for h in before_hostiles)
+            ):
+                return state, executed, 'unsafe: hostile appeared or moved closer'
         return state, executed, 'done'
+
+    def _visible_hostiles(self, obs=None):
+        """Return visible non-pet monsters with Chebyshev distance from the player."""
+        obs = obs or self._obs
+        if obs is None:
+            return []
+        b = obs['blstats']
+        px, py = int(b[0]), int(b[1])
+        hostiles = []
+        glyphs = obs.get('glyphs')
+        try:
+            import nle.nethack as nh
+        except ImportError:
+            nh = None
+        if glyphs is not None and nh is not None:
+            rows, cols = glyphs.shape
+            for y in range(rows):
+                for x in range(cols):
+                    if x == px and y == py:
+                        continue
+                    glyph = glyphs[y][x]
+                    if not nh.glyph_is_monster(glyph) or nh.glyph_is_pet(glyph):
+                        continue
+                    symbol = chr(obs['tty_chars'][y + 1][x])
+                    monster = nh.permonst(nh.glyph_to_mon(glyph))
+                    hostiles.append({
+                        'symbol': symbol,
+                        'name': monster.mname,
+                        'level': int(monster.mlevel),
+                        'speed': int(monster.mmove),
+                        'difficulty': int(monster.difficulty),
+                        'x': x,
+                        'y': y + 1,
+                        'distance': max(abs(x - px), abs(y - py)),
+                    })
+            return hostiles
+        chars = obs['tty_chars']
+        for y in range(MAP_ROWS):
+            for x in range(MAP_COLS):
+                symbol = chr(chars[y + 1][x])
+                if symbol in MONSTER_SYMS and not (x == px and y == py):
+                    hostiles.append({
+                        'symbol': symbol,
+                        'name': self._MONSTER_NAMES.get(symbol, 'monster'),
+                        'x': x,
+                        'y': y + 1,
+                        'distance': max(abs(x - px), abs(y - py)),
+                    })
+        return hostiles
+
+    def _inventory(self, obs=None):
+        obs = obs or self._obs
+        result = {}
+        if obs is None:
+            return result
+        for i in range(55):
+            item = bytes(obs['inv_strs'][i]).decode(
+                'utf-8', errors='ignore').strip('\x00').strip()
+            if item:
+                letter = chr(obs['inv_letters'][i]) if obs['inv_letters'][i] > 0 else '?'
+                result[letter] = item
+        return result
+
+    @staticmethod
+    def _item_appearance(description):
+        text = description.lower().strip()
+        prefixes = (
+            'an uncursed ', 'a uncursed ', 'an blessed ', 'a blessed ',
+            'an cursed ', 'a cursed ', 'uncursed ', 'blessed ', 'cursed ',
+            'an ', 'a ',
+        )
+        for prefix in prefixes:
+            if text.startswith(prefix):
+                text = text[len(prefix):]
+                break
+        return text
+
+    def record_item_use(self, action_name, description, hp_before):
+        if not description or self._obs is None:
+            return ''
+        appearance = self._item_appearance(description)
+        hp_after = int(self._obs['blstats'][10])
+        message = bytes(self._obs['message']).decode(
+            'utf-8', errors='ignore').strip('\x00').strip()
+        observations = []
+        if action_name == 'drink':
+            if hp_after > hp_before:
+                observations.append('restored {} HP'.format(hp_after - hp_before))
+            else:
+                observations.append('no immediate HP recovery observed')
+        if message:
+            observations.append('message: {}'.format(message))
+        note = '; '.join(observations) or 'used; no explicit effect observed'
+        existing = self._item_knowledge.get(appearance, {'uses': 0, 'notes': []})
+        existing['uses'] += 1
+        if note not in existing['notes']:
+            existing['notes'].append(note)
+        self._item_knowledge[appearance] = existing
+        return '{} -> {}'.format(appearance, note)
+
+    def _danger_level(self, obs=None):
+        obs = obs or self._obs
+        if obs is None:
+            return 'normal'
+        b = obs['blstats']
+        hp, hpmax = int(b[10]), int(b[11])
+        hostiles = self._visible_hostiles(obs)
+        nearest = min((h['distance'] for h in hostiles), default=None)
+        if hpmax > 0 and (
+            hp / hpmax < 0.25
+            or self.turn <= self._major_hit_until
+            or (nearest is not None and nearest <= 3 and hp / hpmax < 0.50)
+        ):
+            return 'critical'
+        if hpmax > 0 and (hp / hpmax < 0.50 or nearest is not None):
+            return 'caution'
+        return 'normal'
+
+    def check_action_safety(self, action):
+        """Return a blocking reason for unsafe actions, otherwise an empty string."""
+        if self._obs is None:
+            return ''
+        action = action.strip().lower()
+        hostiles = self._visible_hostiles(self._obs)
+        if action.startswith(('wait', 'search')) and hostiles:
+            nearest = min(h['distance'] for h in hostiles)
+            return 'visible hostile at distance {}; reposition first'.format(nearest)
+        if self._danger_level(self._obs) != 'critical':
+            return ''
+        if action.startswith(('wait', 'search', 'pickup', 'eat')):
+            return 'critical danger permits only healing, escape, movement, prayer, or combat'
+        if action in ('drink', 'read', 'zap'):
+            return 'critical item use requires a named slot so its identity can be checked'
+        if action.startswith('goto:'):
+            try:
+                tx, ty = (int(v.strip()) for v in action[5:].split(',', 1))
+            except (ValueError, IndexError):
+                return 'invalid goto target'
+            known_up = self._known_stairs('<')
+            if (tx, ty) not in known_up:
+                return 'bulk navigation is locked in critical danger unless targeting known upstairs'
+        if action.startswith(('drink:', 'read:', 'zap:')):
+            slot = action.split(':', 1)[1].strip()
+            if ':' in slot:
+                slot = slot.split(':', 1)[0]
+            item = self._inventory().get(slot, '').lower()
+            identified = (
+                'potion of ' in item
+                or 'scroll of ' in item
+                or 'wand of ' in item
+            )
+            if not identified:
+                return 'unidentified consumable is not a reliable critical action'
+        return ''
+
+    def _known_stairs(self, symbol):
+        result = []
+        for y in range(MAP_ROWS):
+            for x in range(MAP_COLS):
+                if self._map_cache[y][x] == symbol:
+                    result.append((x, y + 1))
+        return result
 
     def kick(self, direction):
         """Kick in a direction: send kick command then direction key.
@@ -210,6 +349,9 @@ class NLEEnv:
     def navigate_to(self, tx, ty, on_step=None):
         b = self._obs['blstats']
         px, py = int(b[0]), int(b[1])
+        depth = int(b[12])
+        if (depth, tx, ty - 1) in self._known_hazards:
+            return self.render(), 'known_hazard'
         # ty is display_y (1-based), BFS uses cache_row = display_y - 1
         # tx is column (0-based), same in both systems
         target_cache = {(tx, ty - 1)}
@@ -335,6 +477,27 @@ class NLEEnv:
         if self._current_depth is not None and depth != self._current_depth:
             self._map_cache = [[' '] * MAP_COLS for _ in range(MAP_ROWS)]
         self._current_depth = depth
+        message = bytes(obs['message']).decode(
+            'utf-8', errors='ignore').strip('\x00').strip().lower()
+        trap_names = {
+            'rolling boulder trap': 'rolling boulder trap',
+            'pit': 'pit',
+            'bear trap': 'bear trap',
+            'arrow trap': 'arrow trap',
+            'dart trap': 'dart trap',
+            'falling rock trap': 'falling rock trap',
+            'sleeping gas trap': 'sleeping gas trap',
+            'rust trap': 'rust trap',
+            'fire trap': 'fire trap',
+            'teleportation trap': 'teleportation trap',
+            'level teleporter': 'level teleporter',
+            'magic trap': 'magic trap',
+        }
+        if 'trap' in message or 'you fall into a pit' in message:
+            for marker, name in trap_names.items():
+                if marker in message:
+                    self._known_hazards[(depth, px, py)] = name
+                    break
         for r in range(MAP_ROWS):
             for c in range(MAP_COLS):
                 ch = chr(chars[r + 1][c])
@@ -380,6 +543,9 @@ class NLEEnv:
                 if (nx, nr) in visited:
                     continue
                 if not (0 <= nr < MAP_ROWS and 0 <= nx < MAP_COLS):
+                    continue
+                depth = int(self._obs['blstats'][12]) if self._obs is not None else self._current_depth
+                if (depth, nx, nr) in self._known_hazards:
                     continue
                 # Diagonal corner check: both orthogonal neighbors must be passable
                 if dx != 0 and dy != 0:
@@ -559,21 +725,62 @@ class NLEEnv:
             warnings.append('WARNING: {} - eat food now'.format(_HUNGER_LABEL.get(hunger, 'hungry')))
         if encumbrance >= 2:
             warnings.append('WARNING: {} - drop items'.format(_ENCUMBRANCE_LABEL.get(encumbrance, 'encumbered')))
+        self._last_damage = 0
         if self._prev_hp is not None and hp < self._prev_hp:
-            warnings.append('WARNING: Took {} damage this turn'.format(self._prev_hp - hp))
+            self._last_damage = self._prev_hp - hp
+            warnings.append('WARNING: Took {} damage this turn'.format(self._last_damage))
+            if hpmax > 0 and self._last_damage >= max(1, int(hpmax * 0.20)):
+                self._major_hit_until = max(self._major_hit_until, self.turn + 3)
         self._prev_hp = hp
         return warnings
 
     # Priority advisor
 
-    def _priority(self, obs, stairs_down, monsters, items, unexplored_doors=None):
+    def _priority(self, obs, stairs_down, stairs_up, monsters, items, unexplored_doors=None):
         b = obs['blstats']
         hp, hpmax = int(b[10]), int(b[11])
         hunger = int(b[21])
         px, py = int(b[0]), int(b[1])
         # Hard constraints: survival
-        if hpmax > 0 and hp / hpmax < 0.25:
-            return 'SITUATION: HP critical ({}/{}). Survival is urgent.'.format(hp, hpmax)
+        if self._danger_level(obs) == 'critical':
+            hostiles = self._visible_hostiles(obs)
+            threat = 'none visible'
+            if hostiles:
+                nearest = min(hostiles, key=lambda h: h['distance'])
+                threat = '{} [{}]@({},{}) distance={}'.format(
+                    nearest.get('name', 'monster'), nearest['symbol'],
+                    nearest['x'], nearest['y'], nearest['distance'])
+            inventory = self._inventory(obs)
+            resources = []
+            for slot, item in inventory.items():
+                lowered = item.lower()
+                if any(name in lowered for name in (
+                    'potion of healing', 'potion of extra healing',
+                    'potion of full healing', 'scroll of teleportation',
+                )):
+                    resources.append('{}={}'.format(slot, item))
+            safe_moves = []
+            for name, nx, ny, ch in self._passable_neighbors(px, py, obs)[0]:
+                if ch in MONSTER_SYMS:
+                    continue
+                if (int(b[12]), nx, ny - 1) in self._known_hazards:
+                    continue
+                if hostiles:
+                    old_dist = min(h['distance'] for h in hostiles)
+                    new_dist = min(max(abs(nx - h['x']), abs(ny - h['y'])) for h in hostiles)
+                    if new_dist <= old_dist:
+                        continue
+                safe_moves.append(name)
+            parts = [
+                'SITUATION: CRITICAL DANGER HP {}/{}; nearest hostile: {}'.format(
+                    hp, hpmax, threat),
+                'SAFE MOVES: {}'.format(', '.join(safe_moves) if safe_moves else 'none confirmed'),
+                'KNOWN RESOURCES: {}'.format('; '.join(resources) if resources else 'none identified'),
+            ]
+            if stairs_up:
+                parts.append('RETREAT TARGET: upstairs {}'.format(stairs_up[0]))
+            parts.append('FORBIDDEN: wait/search/loot/eat/unknown consumables/unplanned exploration')
+            return ' | '.join(parts)
         if hunger >= 3:
             food = [i for i in items if '%' in i]
             if food:
@@ -660,7 +867,7 @@ class NLEEnv:
         lines = []
         for w in self._status_warnings(obs):
             lines.append(w)
-        lines.append(self._priority(obs, stairs_down, monsters, items, unexplored_doors))
+        lines.append(self._priority(obs, stairs_down, stairs_up, monsters, items, unexplored_doors))
         lines.append('')
         cr = py
         terrain = ''
@@ -671,15 +878,40 @@ class NLEEnv:
         lines.append('Stairs down(>): {}'.format(stairs_down if stairs_down else 'not found yet - keep exploring'))
         if stairs_up:
             lines.append('Stairs up(<): {}'.format(stairs_up))
+        depth = int(b[12])
+        hazards = [
+            '({},{})={}'.format(x, y + 1, name)
+            for (d, x, y), name in self._known_hazards.items()
+            if d == depth
+        ]
+        if hazards:
+            lines.append('Known hazards (AVOID): {}'.format(', '.join(hazards)))
         if monsters:
             lines.append('Monsters visible: {}'.format(' '.join(monsters)))
+        hostiles = self._visible_hostiles(obs)
+        if hostiles:
+            lines.append('Hostile threats: {}'.format(' '.join(
+                '{}@({},{}) dist={} lvl={} speed={} difficulty={}'.format(
+                    h.get('name', h['symbol']), h['x'], h['y'], h['distance'],
+                    h.get('level', '?'), h.get('speed', '?'), h.get('difficulty', '?'))
+                for h in hostiles
+            )))
         if items:
             lines.append('Items on floor: {}'.format(' '.join(items)))
+        if self._item_knowledge:
+            observations = []
+            for appearance, knowledge in self._item_knowledge.items():
+                observations.append('{} (uses={}): {}'.format(
+                    appearance, knowledge['uses'], ' | '.join(knowledge['notes'][-2:])))
+            lines.append('Session item observations: {}'.format('; '.join(observations)))
         passable, unexplored = self._passable_neighbors(px, py, obs)
         if passable:
             nb_strs = []
             for name, nx, ny, ch in passable:
-                if ch in _TILE_LABEL:
+                hazard = self._known_hazards.get((int(b[12]), nx, ny - 1))
+                if hazard:
+                    label = 'KNOWN HAZARD: {} - AVOID'.format(hazard)
+                elif ch in _TILE_LABEL:
                     label = _TILE_LABEL[ch]
                 elif ch in MONSTER_SYMS:
                     label = 'MONSTER({}) {}'.format(ch, NLEEnv._MONSTER_NAMES.get(ch, ''))
@@ -781,7 +1013,7 @@ class NLEEnv:
         if legend:
             lines.append('')
             lines.append(legend)
-        return '[ENV_V8] Features:\n  ' + '\n  '.join(lines)
+        return '[ENV_V9] Features:\n  ' + '\n  '.join(lines)
 
     # Render
 
@@ -901,12 +1133,6 @@ class NLEEnv:
         if inv_lines:
             lines.append('Inventory: ' + '  '.join(inv_lines[:8]))
         return '\n'.join(lines)
-
-    def render_debug(self, obs=None):
-        if obs is None:
-            obs = self._obs
-        self._update_map_cache(obs)
-        return self._render_map_cache(obs)
 
     def _save_log(self, final_reward):
         os.makedirs(self.log_dir, exist_ok=True)

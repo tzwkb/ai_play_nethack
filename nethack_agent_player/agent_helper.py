@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NetHack Agent Helper — run inside WSL.
+NetHack Agent Helper — IPC wrapper for the play.py turn loop (runs under any python3).
 Wraps the write→wait→read IPC cycle into a single clean call.
 
 Usage:
@@ -10,7 +10,7 @@ Usage:
     python3 agent_helper.py goto:x,y      # navigate to coordinates
     python3 agent_helper.py drink:f       # quaff potion in slot f
     python3 agent_helper.py read:e        # read scroll in slot e
-    python3 agent_helper.py zap:f,north   # zap wand f northward
+    python3 agent_helper.py zap:f:north   # zap wand f northward
     python3 agent_helper.py wield:a       # wield weapon in slot a
     python3 agent_helper.py wear:c        # wear armor in slot c
     python3 agent_helper.py takeoff:c     # take off armor in slot c
@@ -19,6 +19,7 @@ Usage:
     python3 agent_helper.py kick:east:5   # kick up to 5 times (stops if door opens)
     python3 agent_helper.py --read        # just read current state
     python3 agent_helper.py --start <character>  # start play.py in tmux
+    python3 agent_helper.py --choose <character> # answer pending character selection
 
 Examples:
     python3 agent_helper.py north
@@ -26,7 +27,7 @@ Examples:
     python3 agent_helper.py keys:z,f,k
     python3 agent_helper.py walk:east
     python3 agent_helper.py drink:f
-    python3 agent_helper.py zap:f,east
+    python3 agent_helper.py zap:f:east
     python3 agent_helper.py wield:a
     python3 agent_helper.py kick:east:5
     python3 agent_helper.py --read
@@ -36,6 +37,7 @@ import sys
 import os
 import time
 import re
+import shlex
 
 # Logging
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -221,9 +223,20 @@ def read_state() -> str:
 
 def start_game(character: str = None):
     """Start play.py in a tmux session named 'nethack'."""
-    cmd = f"python3 {PLAY_PY}"
+    for stale in (
+        READY_FILE, ACTION_FILE, ACTION_FILE + ".tmp", GAMEOVER_FILE,
+        GAMEOVER_FILE + ".tmp", CHARSELECT_FILE, CHARSELECT_FILE + ".tmp",
+        CHARSELECT_RESP, CHARSELECT_RESP + ".tmp",
+    ):
+        try:
+            os.remove(stale)
+        except FileNotFoundError:
+            pass
+    bundled_python = os.path.join(SCRIPT_DIR, ".venv", "bin", "python")
+    runtime = bundled_python if os.path.exists(bundled_python) else sys.executable
+    cmd = "{} {}".format(shlex.quote(runtime), shlex.quote(PLAY_PY))
     if character:
-        cmd += f" {character}"
+        cmd += " " + shlex.quote(character)
     cmd += " --display"
     tmux_cmd = f"tmux new-session -d -s nethack '{cmd}' 2>/dev/null || tmux kill-session -t nethack && tmux new-session -d -s nethack '{cmd}'"
     os.system(tmux_cmd)
@@ -241,15 +254,28 @@ def start_game(character: str = None):
         import json
         with open(CHARSELECT_FILE) as f:
             opts = json.load(f)
-        print("Character options available. Roles:", list(opts["roles"].keys()))
-        print("Defaulting to: val-hum-fem-neu (edit agent_helper.py to change)")
-        choice = "val-hum-fem-neu"
-        tmp = CHARSELECT_RESP + ".tmp"
-        with open(tmp, "w") as f:
-            f.write(choice)
-        os.replace(tmp, CHARSELECT_RESP)
+        print(json.dumps(opts, ensure_ascii=False, indent=2))
+        print("Character selection is pending; choose freely with --choose <character>.")
+        return
 
     # wait for initial state
+    deadline = time.time() + 30
+    while not os.path.exists(READY_FILE):
+        if time.time() > deadline:
+            print("[TIMEOUT] Initial state never appeared.", file=sys.stderr)
+            sys.exit(1)
+        time.sleep(0.1)
+    print(read_state())
+
+
+def choose_character(character: str):
+    if not os.path.exists(CHARSELECT_FILE):
+        print("[ERROR] No character selection is pending.", file=sys.stderr)
+        sys.exit(1)
+    tmp = CHARSELECT_RESP + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(character)
+    os.replace(tmp, CHARSELECT_RESP)
     deadline = time.time() + 30
     while not os.path.exists(READY_FILE):
         if time.time() > deadline:
@@ -270,6 +296,11 @@ def main():
     elif args[0] == "--start":
         character = args[1] if len(args) > 1 else None
         start_game(character)
+    elif args[0] == "--choose":
+        if len(args) < 2:
+            print("[ERROR] --choose requires <role>-<race>-<gender>-<alignment>.", file=sys.stderr)
+            sys.exit(1)
+        choose_character(args[1])
     elif args[0] == "--gameover":
         if os.path.exists(GAMEOVER_FILE):
             with open(GAMEOVER_FILE) as f:

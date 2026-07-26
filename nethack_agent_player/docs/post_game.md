@@ -13,6 +13,7 @@ from scripts.memory import Memory
 
 memory = Memory("nethack_memory.json")
 memory.save({
+    "game_id": "<session id>",
     "turns": <total turns>,
     "depth": <final dlvl>,
     "cause": "<what killed you or why you stopped>",
@@ -22,6 +23,9 @@ memory.save({
     ],
 })
 ```
+
+`game_id` 相同时 `save()` 更新原记录，不重复追加。精确删除旧教训使用
+`memory.delete_lesson(text)`。
 
 4. If a new rule should apply to all future runs → update the relevant `docs/` file
 5. At the start of the next run: `memory.load(last_n=5)` to recall past lessons
