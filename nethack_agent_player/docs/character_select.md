@@ -14,7 +14,7 @@ import json, os
 with open("/tmp/nethack_charselect") as f:
     options = json.load(f)
 
-choice = "val-hum-fem-neu"  # see strategy below
+choice = decide_from_options(options)  # no hardcoded default
 
 with open("/tmp/nethack_charselect_response.tmp", "w") as f:
     f.write(choice)
@@ -32,9 +32,16 @@ Invalid combos are auto-corrected by NetHack.
 ## Strategy
 
 1. Check `memory.load()` — past lessons may favor a specific role
-2. Default safe pick: `val-hum-fem-neu` (high HP, strong melee, good AC, beginner-friendly)
-3. Wizard (`wiz-hum-mal-neu`): powerful magic but fragile — only if you have an early survival plan
-4. Avoid Tourist — weak early game
+2. Choose freely for the current run; no role/race/gender/alignment is hardcoded
+3. Use past lessons to adjust tactics, not to force a specific role
+4. Fragile roles need an explicit early survival plan; Tourist remains a high-risk pick
+
+When `agent_helper.py --start` is used without a character, it prints the available
+options and leaves selection pending. Complete it with:
+
+```bash
+python3 agent_helper.py --choose bar-hum-mal-neu
+```
 
 ## Role quick ref
 

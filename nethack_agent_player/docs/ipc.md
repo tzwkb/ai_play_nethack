@@ -86,4 +86,6 @@ Inventory (N): a) item ...
 
 - Named action: `north`, `search`, `descend`, etc.
 - Multi-step: `keys:q,g` (quaff item g) — see [multi_step.md](multi_step.md)
+- Safe rest: `safe_wait:20` — rechecks HP and hostile distance every turn
+- Explicit override: `force:<action>` — bypasses a reported safety block after risk review
 

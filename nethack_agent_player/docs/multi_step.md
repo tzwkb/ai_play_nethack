@@ -131,3 +131,34 @@ Verified working over IPC (NLE 1.3.0, `allow_all_yn_questions=True`):
 - Large boxes are too heavy to carry — **never `pickup` them**; drop (`drop:<slot>`)
   and loot on the floor. They are often empty.
 - Direction action indices (vi-keys): N=0 E=1 S=2 W=3 NE=4 SE=5 SW=6 NW=7.
+
+## Identifying wands safely (engrave-test) + direction prompts
+
+Never zap an unidentified wand at yourself or your pet (polymorph / cancellation /
+teleport can wreck both). **Engrave-test first** — it's free and safe:
+
+```
+keys:E            # "What do you want to write with? [- a-z]"
+keys:<wand-slot>  # e.g. keys:h
+```
+
+The engrave message classifies the wand:
+
+| Engrave message | Wand is… |
+|-----------------|----------|
+| digs a hole / you fall through | **digging** (you descend — fine) |
+| engraving burns / freezes / bolt | fire / cold / lightning / magic missile / striking / sleep / death (an **attack** wand — auto-IDs) |
+| "the bugs … stop / slow down / speed up" | sleep / slow monster / speed monster |
+| **"The wand glows, then fades."** | a **directional, non-elemental** wand: opening, locking, probing, undead turning, cancellation, polymorph, make invisible, or teleportation (not digging, not an attack wand) |
+| "You write in the dust …" (no special effect) | a non-directional utility wand (light, secret door detection, …) |
+
+**Directional vs not:** if zapping (`keys:z,<slot>`) shows `In what direction?`, the
+wand is **directional** — so it is NOT secret door detection / light / magic mapping.
+Combined with a "glows, then fades" engrave, you have a directional utility wand worth
+keeping for emergencies; get a scroll of identify / price-ID to pin the exact type.
+
+**⚠ ESC at a direction prompt WASTES a charge.** `keys:27` answers "In what
+direction?" as a *strange direction* → "the wand glows and fades", charge gone, no
+effect. To abort a zap, cancel at the *item-selection* prompt (before choosing the
+wand), never at the direction prompt. Only zap when you actually intend to aim
+(`zap:<slot>:<dir>` or `keys:z,<slot>,<vi-key>`).

@@ -23,11 +23,15 @@ Melee is acceptable when ANY of these apply:
 | < 20% | use healing potion if available |
 | < 10% | use best healing available, pray if no potions |
 
-**Low HP alone is NOT a reason to flee.** If the enemy is weak (jackal, grid bug, newt, kobold, etc.), fight even at low HP — fleeing wastes turns and may not be possible anyway. Judge the threat, not just your HP.
+Below 25% HP, the safety lock overrides normal aggression. Do not wait, search,
+loot, eat, test unknown consumables, or explore. Prefer identified healing/escape,
+the known upstairs, or movement that increases distance. Fight only when no safer
+action exists.
 
 ## Tactics
 
-- `wait` → lets pet move first and draw aggro
+- `safe_wait:N` is the normal rest action and stops when danger changes
+- Never wait while a hostile is visible
 - Funnel enemies into corridors — fight one at a time, never in open rooms
 - Diagonal movement to dodge grid bugs (they only move cardinally)
 - **Floating eye** (`e`): NEVER melee — paralyzes you. Use wand or let pet handle.

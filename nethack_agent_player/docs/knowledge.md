@@ -69,8 +69,22 @@ Unknown symbol → `wiki_lookup('symbol name')`.
 | `F` | lichen | very slow; can grab you; no stat drain |
 | `e` | floating eye or gas spore | NEVER melee either — see combat.md |
 
+## Unidentified item heuristics (wear / eat decisions)
+
+Decide from the **appearance** before you have an ID:
+
+| Item / appearance | Verdict |
+|-------------------|---------|
+| Cloak: *opera cloak / tattered cape / ornamental cope / piece of cloth* | Always a **magic cloak** (protection / invisibility / magic resistance / displacement) → **safe to wear unID'd** (+AC and/or a strong property; worst case cursed-but-beneficial). |
+| Cloak: leather / oilskin / dwarvish / elven | Mundane, safe to wear. |
+| Gloves: *riding / old / padded / fencing gloves* | May be **gauntlets of fumbling** (drops weapon mid-fight) → **carry, do NOT wear unID'd**. Price-ID at a shop or read identify first. |
+| Helm: fixed-name *orcish helm / dwarvish iron helm / …* | Exactly that (small +AC) → safe to wear. |
+| Helm: *plumed / etched / crested / visored helmet* | May be **helm of opposite alignment** (cursed, flips alignment) → don't wear unID'd. |
+| Ring / amulet (any) | Never `puton` unID'd without BUC (altar / identify) — cursed ones stick, some are lethal. |
+| **Lichen corpse** | **Never rots** → always `pickup` as emergency food; safe to eat. |
+
 ## After every lookup
 
-- New monster → `save_monster(...)` 
+- New monster → `save_monster(...)`
 - New item → `save_item(...)`
 - New symbol or mechanic → add row to this file

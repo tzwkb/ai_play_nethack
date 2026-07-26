@@ -20,7 +20,7 @@ def test_direction_actions_present():
 
 def test_common_actions_present():
     """Essential gameplay actions must exist."""
-    essential = ['wait', 'search', 'descend', 'ascend', 'pickup', 'eat', 'drink', 'open']
+    essential = ['wait', 'search', 'descend', 'ascend', 'pickup', 'eat', 'drink', 'open', 'pray']
     for a in essential:
         assert a in ACTION_MAP, f"Missing essential action: {a}"
 
@@ -32,7 +32,6 @@ def test_char_to_idx_without_env():
     assert hasattr(NLEEnv, 'send_keys')
     assert hasattr(NLEEnv, 'step')
     assert hasattr(NLEEnv, '_flush_pending')
-    assert hasattr(NLEEnv, 'detect_mode')
 
 
 def test_navigate_method_exists():

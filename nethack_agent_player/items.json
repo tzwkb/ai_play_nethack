@@ -166,5 +166,47 @@
     "effect": "",
     "notes": "Identified at death",
     "source": "wiki"
+  },
+  "rusty +0 battle-axe (weapon in hands)": {
+    "name": "rusty +0 battle-axe (weapon in hands)",
+    "category": "weapon",
+    "effect": "",
+    "notes": "Identified at death",
+    "source": "wiki"
+  },
+  "+0 short sword (alternate weapon; not wielded)": {
+    "name": "+0 short sword (alternate weapon; not wielded)",
+    "category": "weapon",
+    "effect": "",
+    "notes": "Identified at death",
+    "source": "wiki"
+  },
+  "scroll of create monster": {
+    "name": "scroll of create monster",
+    "category": "scroll",
+    "effect": "",
+    "notes": "Identified at death",
+    "source": "wiki"
+  },
+  "scroll of food detection": {
+    "name": "scroll of food detection",
+    "category": "scroll",
+    "effect": "",
+    "notes": "Identified at death",
+    "source": "wiki"
+  },
+  "wand of light (0:12)": {
+    "name": "wand of light (0:12)",
+    "category": "wand",
+    "effect": "",
+    "notes": "Identified at death",
+    "source": "wiki"
+  },
+  "scroll of gold detection": {
+    "name": "scroll of gold detection",
+    "category": "scroll",
+    "effect": "",
+    "notes": "Identified at death",
+    "source": "wiki"
   }
 }
